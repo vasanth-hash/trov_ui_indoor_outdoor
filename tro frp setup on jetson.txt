@@ -1,0 +1,71 @@
+Download FRP Client on Jetson
+
+cd /opt
+sudo wget https://github.com/fatedier/frp/releases/download/v0.58.0/frp_0.58.0_linux_arm64.tar.gz
+tar -xvf frp_0.58.0_linux_arm64.tar.gz
+sudo mv frp_0.58.0_linux_arm64 frp
+cd frp
+
+Create FRP Client Config
+nano /opt/frp/frpc.toml
+
+
+serverAddr = "187.77.184.19"
+serverPort = 7000
+auth.token = "edgeforce@2020"
+
+[[proxies]]
+name = "cameras"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8889      # Jetson's local Nginx
+remotePort = 8888    # Port exposed on VPS
+
+
+Create systemd Service on Jetson
+nano /etc/systemd/system/frpc.service
+
+[Unit]
+Description=FRP client
+After=network.target
+
+[Service]
+ExecStart=/opt/frp/frpc -c /opt/frp/frpc.toml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+
+Enable & Start FRP Client
+
+systemctl daemon-reload
+systemctl enable frpc
+systemctl start frpc
+systemctl stop frpc
+systemctl restart frpc
+systemctl status frpc
+
+
+Verify Tunnel
+
+
+sudo systemctl status frpc check if it ruing , debug use Check logs: journalctl -u frcp -f 
+
+
+webrtc: true
+webrtcAddress: :8889
+
+webrtcIPsFromInterfaces: true
+
+webrtcAdditionalHosts:
+  - 187.77.184.19
+
+webrtcICEServers2:
+  - url: stun:stun.l.google.com:19302 in mediamtx.yml
+
+
+
+s
+

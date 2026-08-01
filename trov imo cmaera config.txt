@@ -1,0 +1,1 @@
+AppSecret:97a77a752d5248cbbacd25de36caef app id :lc09e486a9ebaa4239 login to https://open.imoulife.com/consoleNew/myApp/appInfo with Vasanth's credentials and vasanth@edgeforce.in and password Edgeforce@ranger2 ,device serial number :A889AAMPGVAFE14

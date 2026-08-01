@@ -1,0 +1,69 @@
+
+Trov ROS 2 Simulation Setup & Workflow Guide
+This document summarizes the configuration, commands, and logic used to set up the Trov Waypoint Recording and Following system in a ROS 2 Jazzy / Ubuntu 24.04 (WSL) environment.
+
+1. Workspace Configuration (The Foundation)
+Before running the system, the setup.py must be correctly configured so ROS 2 can find your files.
+
+File: ~/trov_ws/src/trov/setup.py
+
+Key Change: Ensure data_files includes the launch folder mapping:
+('share/' + package_name, glob('launch/*.py'))
+
+Purpose: This tells the build tool (colcon) to copy your Python launch files into the install directory so the ros2 launch command can find them.
+
+Entry Points: Ensure names like recorder and follower point to the correct Python scripts.
+
+2. The Build & Refresh Cycle
+Run these in your main terminal whenever you change code or file structures.
+
+Bash
+cd ~/trov_ws
+rm -rf build/ install/ log/
+colcon build --symlink-install
+source install/setup.bash
+Purpose: rm -rf clears old, broken paths. --symlink-install allows you to edit Python scripts without rebuilding every time. source refreshes your terminal's "memory" so it recognizes the trov package.
+
+3. Execution Steps (Run in separate Terminal Tabs)
+Terminal 1: The Simulation & Navigation
+Bash
+ros2 launch trov simulation_launch.py use_sim_time:=true
+Purpose: Starts Gazebo (physics), RViz (visualization), and Nav2 (the navigation engine).
+
+Why use_sim_time:=true? Crucial in WSL/Gazebo to ensure nodes use the simulation clock instead of the Windows system clock, preventing "TF_OLD_DATA" errors.
+
+Terminal 2: The Map Provider (SLAM)
+Bash
+ros2 launch slam_toolbox online_async_launch.py use_sim_time:=true
+Purpose: Generates the map frame. Without this, the robot doesn't know its coordinates (x,y), and the recorder will fail to save data.
+
+Terminal 3: The Communication Bridge
+Bash
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml
+Purpose: Opens a WebSocket on port 9090. This allows your Windows Web Browser (UI) to "talk" to the Linux ROS 2 nodes.
+
+Terminal 4: The Recorder Node
+Bash
+ros2 run trov recorder --ros-args -p use_sim_time:=true
+Purpose: Starts the logic that listens to the robot's position and saves it to recorded_waypoints.yaml when triggered by the UI.
+
+Terminal 5: The Manual Controls (Teleop)
+Bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+Purpose: Allows you to drive the robot using I, J, K, L keys to record a path.
+
+4. Operational Workflow
+Task	Action	Why?
+Start Recording	Open index.html on Windows, enter a name (e.g., "tharun"), click Start.	Tells the recorder node to begin buffering (x,y) points.
+Drive	Click the Teleop terminal and drive the robot in Gazebo.	The robot must move for the recorder to trigger a "New Waypoint" (usually every 1.5m).
+Save Route	Click Stop & Save in the UI.	Writes the coordinates to the YAML file on your disk.
+Set Route	ros2 topic pub /route_follower/set_route std_msgs/msg/String "{data: 'tharun'}" -1	Tells the follower script which specific list of points to load.
+Follow Route	Click Start Mission in UI.	Robot will autonomously visit the 8 waypoints recorded earlier.
+5. Troubleshooting Common Errors
+"Frame 'map' does not exist": SLAM (Terminal 2) is not running or hasn't finished initializing.
+
+"Navigation Failed (Status 6)": The robot is already at the target point. Drive the robot at least 2 meters away before starting the mission.
+
+"No cmd_vel_safe received": The safety check is looking for a collision monitor. If you aren't using one, update the script to subscribe to /cmd_vel or /odom instead.
+
+UI Disconnected: Ensure the rosbridge (Terminal 3) is running. If on a different machine, replace localhost in the HTML with your WSL IP (hostname -I).

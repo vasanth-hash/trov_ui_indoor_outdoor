@@ -1,0 +1,90 @@
+Install FRP Server
+
+Run on VPS:
+
+cd /opt
+wget https://github.com/fatedier/frp/releases/download/v0.58.0/frp_0.58.0_linux_amd64.tar.gz
+tar -xvf frp_0.58.0_linux_amd64.tar.gz
+mv frp_0.58.0_linux_amd64 frp
+cd frp
+mmmm
+root@srv1417867:/opt# mv frp_0.58.0_linux_amd64 frp
+root@srv1417867:/opt# cd frp
+root@srv1417867:/opt/frp# ls
+LICENSE  frpc  frpc.toml  frps  frps.toml
+root@srv1417867:/opt/frp# cd ..
+root@srv1417867:/opt# ls
+containerd  frp  frp_0.58.0_linux_amd64.tar.gz
+root@srv1417867:/opt# cd frp
+root@srv1417867:/opt/frp#
+
+
+root@srv1417867:/opt/frp# nano /opt/frp/frps.toml
+root@srv1417867:/opt/frp# cat /opt/frp/frps.toml
+bindPort = 7000
+auth.token = "edgeforce@2020"
+root@srv1417867:/opt/frp#
+
+
+root@srv1417867:/opt/frp# nano /etc/systemd/system/frps.service
+root@srv1417867:/opt/frp# cat /etc/systemd/system/frps.service
+[Unit]
+Description=frp server
+After=network.target
+
+[Service]
+ExecStart=/opt/frp/frps -c /opt/frp/frps.toml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+root@srv1417867:/opt/frp#
+
+
+
+root@srv1417867:/opt/frp# systemctl start frps
+root@srv1417867:/opt/frp# ss -tulnp | grep 7000
+tcp   LISTEN 0      4096               *:7000             *:*    users:(("frps",pid=306217,fd=3))
+
+
+root@srv1417867:/opt/frp# nano /etc/nginx/sites-available/trovcamera
+root@srv1417867:/opt/frp# cat /etc/nginx/sites-available/trovcamera
+server {
+    listen 80 default_server;
+    server_name _;
+
+    location / {
+        return 200 "Camera server is live (IP test)";
+    }
+}
+root@srv1417867:/opt/frp# nginx -t
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+root@srv1417867:/opt/frp# systemctl reload nginx
+root@srv1417867:/opt/frp# curl http://187.77.184.19
+Camera server is live (IP test)root@srv1417867:/opt/frp#
+
+
+
+root@srv1417867:/opt# nano /etc/nginx/sites-available/trovcamera
+root@srv1417867:/opt# cat /etc/nginx/sites-available/trovcamera
+server {
+    listen 80 default_server;
+    server_name _;
+
+
+    location /driving_camera/ {
+        proxy_pass http://127.0.0.1:8888/driving_camera/;
+
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        proxy_buffering off;
+        proxy_read_timeout 86400s;
+    }
+}
+root@srv1417867:/opt# nginx -t
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+root@srv1417867:/opt# systemctl reload nginx
