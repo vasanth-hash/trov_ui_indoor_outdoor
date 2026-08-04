@@ -12,6 +12,17 @@ const TOPIC = {
   GOAL_POSE:    '/goal_pose',
 }
 
+// ── Outdoor localization display topics ───────────────────────────────────────
+// Outdoor draws /outdoor_map (pcd_to_grid) and reads pose from the lidar
+// localizer. >>> CONFIRM the pose topic + type on the AGX:
+//     ros2 topic list | grep -i pose
+// lidar_localization_ros2 commonly publishes /current_pose (PoseStamped). If
+// yours differs (e.g. /pcl_pose PoseWithCovarianceStamped), change these two.
+// /initialpose and /goal_pose are standard and shared, so they don't change.
+const OUTDOOR_MAP        = '/outdoor_map'
+const OUTDOOR_POSE_TOPIC = '/pcl_pose'
+const OUTDOOR_POSE_TYPE  = 'geometry_msgs/PoseStamped'
+
 // ── useRosBridge ──────────────────────────────────────────────────────────────
 function useRosBridge(url) {
   const wsRef = useRef(null), subMap = useRef({}), advMap = useRef({})
@@ -353,6 +364,9 @@ export default function IndoorNavigation() {
   const { ready, wsStatus, subscribe, advertise, publish } = useRosBridge(ROSBRIDGE_URL)
   const { environment } = useEnvironment()
   const isOutdoor = environment === 'outdoor'
+  const mapTopic  = isOutdoor ? OUTDOOR_MAP        : TOPIC.MAP
+  const poseTopic = isOutdoor ? OUTDOOR_POSE_TOPIC : TOPIC.AMCL
+  const poseType  = isOutdoor ? OUTDOOR_POSE_TYPE  : 'geometry_msgs/PoseWithCovarianceStamped'
 
   const [mapData,     setMapData]     = useState(null)
   const [mapStatus,   setMapStatus]   = useState('waiting…')
@@ -383,13 +397,14 @@ export default function IndoorNavigation() {
     advertise(TOPIC.GOAL_POSE,    'geometry_msgs/msg/PoseStamped')
 
     const unsubs = [
-      subscribe(TOPIC.MAP, 'nav_msgs/OccupancyGrid', (msg) => {
+      subscribe(mapTopic, 'nav_msgs/OccupancyGrid', (msg) => {
         const d = decodeOccupancyGrid(msg)
         if (d) { setMapData(d); setMapStatus(`${msg.info.width}×${msg.info.height} @ ${msg.info.resolution.toFixed(3)}m/cell`); addLog(`Map: ${msg.info.width}×${msg.info.height}`, 'info') }
       }, { queue_length:0, latch:true }),
 
-      subscribe(TOPIC.AMCL, 'geometry_msgs/PoseWithCovarianceStamped', (msg) => {
-        const pos=msg.pose?.pose?.position, ori=msg.pose?.pose?.orientation
+      subscribe(poseTopic, poseType, (msg) => {
+        // Tolerant of PoseWithCovarianceStamped (pose.pose.*) and PoseStamped (pose.*)
+        const pos=msg.pose?.pose?.position ?? msg.pose?.position, ori=msg.pose?.pose?.orientation ?? msg.pose?.orientation
         if (!pos) return
         let yaw=0; if(ori){const{x,y,z,w}=ori;yaw=Math.atan2(2*(w*z+x*y),1-2*(y*y+z*z))}
         const np={x:pos.x,y:pos.y,yaw}; robotPosRef.current=np; setRobotPos(np)

@@ -19,7 +19,7 @@ const NAV_ITEMS = [
    { path: '/indoor',            icon: IndoorIcon, label: 'Indoor',            sub: 'Indoor Nav',       iconKey: 'ind'  },
   { path: '/webrtc-cameras',    icon: CamIcon,    label: 'Sights',    sub: 'Live Feed',        iconKey: 'cam'  },
   { path: '/waypoint-recorder', icon: RecIcon,    label: 'Waypoint Recorder', sub: 'Mission Plan',     iconKey: 'rec'  },
-  { path: '/waypoint-follower', icon: FollowIcon, label: 'Waypoint Follower', sub: 'Autonomous',       iconKey: 'fol'  },
+  // { path: '/waypoint-follower', icon: FollowIcon, label: 'Waypoint Follower', sub: 'Autonomous',       iconKey: 'fol'  },
   // { path: '/systemcontrol',     icon: SysIcon,    label: 'System Control',    sub: 'Controls',         iconKey: 'sys'  },
   { path: '/mapping',           icon: MapIcon,    label: 'Mapping',           sub: 'Maps',             iconKey: 'map'  },
   // { path: '/delivery',            icon: IndoorIcon, label: 'Delivery',            sub: 'Delivery',       iconKey: 'ind'  },

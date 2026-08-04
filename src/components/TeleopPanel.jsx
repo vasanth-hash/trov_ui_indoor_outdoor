@@ -1,6 +1,3 @@
-
-
-
 /**
  * TeleopPanel — camera feeds + velocity config + d-pad teleop
  *
@@ -15,11 +12,33 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 
-const DEFAULT_CMD_VEL = '/cmd_vel_smoothed'
-// const DEFAULT_CMD_VEL = '/mavros/rc/override'
-const DEFAULT_HZ      = 10
-const DEFAULT_LINEAR  = 0.3
-const DEFAULT_ANGULAR = 0.5
+// ── Manual drive via MAVROS RC override (published straight to the FCU) ──────
+const RC_OVERRIDE_TOPIC = '/mavros/rc/override'
+const RC_TYPE           = 'mavros_msgs/OverrideRCIn'
+const DEFAULT_HZ        = 10
+
+// 0-based channel indices: rc0 = steer, rc2 = throttle (rc5 = arming, handled elsewhere)
+const CH_STEER    = 0
+const CH_THROTTLE = 2
+const RC_NEUTRAL  = 1501
+const RC_NOCHANGE = 65535   // OverrideRCIn: leave a channel untouched
+
+// Hardcoded PWM (µs) per direction — steer on rc0, throttle on rc2
+const RC = {
+  FWD:   { steer: RC_NEUTRAL, throttle: 1520 },
+  BACK:  { steer: RC_NEUTRAL, throttle: 1480 },
+  LEFT:  { steer: 1340,       throttle: RC_NEUTRAL },
+  RIGHT: { steer: 1650,       throttle: RC_NEUTRAL },
+  STOP:  { steer: RC_NEUTRAL, throttle: RC_NEUTRAL },
+}
+
+// Build an 18-channel OverrideRCIn: override steer + throttle, leave the rest untouched
+function rcOverrideMsg(steer, throttle) {
+  const channels = new Array(18).fill(RC_NOCHANGE)
+  channels[CH_STEER]    = steer
+  channels[CH_THROTTLE] = throttle
+  return { channels }
+}
 
 const VPS_HOST    = 'trovcamera.edgeforce.in'
 const WEBRTC_PORT = 'webrtc'
@@ -261,102 +280,6 @@ function CameraToggleSection({ camera }) {
   )
 }
 
-// ─── VelInput ─────────────────────────────────────────────────────────────────
-function VelInput({ linearSpeed, angularSpeed, onApply, onSend, ready }) {
-  const [lxRaw, setLxRaw] = useState(String(linearSpeed))
-  const [azRaw, setAzRaw] = useState(String(angularSpeed))
-  const [error, setError] = useState('')
-
-  const parsed = () => {
-    const lx = parseFloat(lxRaw), az = parseFloat(azRaw)
-    if (isNaN(lx) || isNaN(az)) { setError('Enter valid numbers'); return null }
-    if (Math.abs(lx) > 5)       { setError('Linear |x| ≤ 5 m/s');  return null }
-    if (Math.abs(az) > 5)       { setError('Angular |z| ≤ 5 r/s'); return null }
-    setError(''); return { lx, az }
-  }
-
-  const inputStyle = {
-    width: '100%', boxSizing: 'border-box',
-    background: 'rgba(0,0,0,0.5)',
-    border: '1px solid rgba(255,255,255,0.12)',
-    color: '#ffffff',
-    fontFamily: 'monospace', fontSize: 13,
-    padding: '7px 9px',
-    outline: 'none',
-    transition: 'border-color 0.15s',
-  }
-
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-
-      {/* Status row */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-        <span style={T.sectionLabel}>Velocity Config</span>
-        <span style={{ fontFamily:'monospace', fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase',
-          color: ready ? 'rgba(255,255,255,0.6)' : '#C8000A', fontWeight:700 }}>
-          {ready ? '● LIVE' : '○ OFFLINE'}
-        </span>
-      </div>
-
-      {/* Two inputs */}
-      <div style={{ display:'flex', gap:8 }}>
-        <div style={{ flex:1 }}>
-          <p style={T.fieldLabel}>Linear X <span style={{ color:'rgba(255,255,255,0.25)' }}>m/s</span></p>
-          <input type="number" step="0.05" placeholder="0.30" value={lxRaw}
-            onChange={e => { setLxRaw(e.target.value); setError('') }}
-            onKeyDown={e => e.key === 'Enter' && parsed() && onApply(parseFloat(lxRaw), parseFloat(azRaw))}
-            style={inputStyle}
-            onFocus={e => e.target.style.borderColor='#C8000A'}
-            onBlur={e  => e.target.style.borderColor='rgba(255,255,255,0.12)'}
-          />
-        </div>
-        <div style={{ flex:1 }}>
-          <p style={T.fieldLabel}>Angular Z <span style={{ color:'rgba(255,255,255,0.25)' }}>r/s</span></p>
-          <input type="number" step="0.05" placeholder="0.50" value={azRaw}
-            onChange={e => { setAzRaw(e.target.value); setError('') }}
-            onKeyDown={e => e.key === 'Enter' && parsed() && onApply(parseFloat(lxRaw), parseFloat(azRaw))}
-            style={inputStyle}
-            onFocus={e => e.target.style.borderColor='#C8000A'}
-            onBlur={e  => e.target.style.borderColor='rgba(255,255,255,0.12)'}
-          />
-        </div>
-      </div>
-
-      {error && <p style={T.error}>⚠ {error}</p>}
-
-      {/* Buttons */}
-      <div style={{ display:'flex', gap:8 }}>
-        <button onClick={() => { const v = parsed(); if (v) onApply(v.lx, v.az) }}
-          style={{ flex:1, padding:'8px 0', cursor:'pointer', transition:'all 0.1s',
-            fontFamily:'monospace', fontSize:11, letterSpacing:'0.2em', textTransform:'uppercase', fontWeight:700,
-            border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.05)', color:'rgba(255,255,255,0.7)' }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor='#C8000A'; e.currentTarget.style.color='#C8000A' }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor='rgba(255,255,255,0.2)'; e.currentTarget.style.color='rgba(255,255,255,0.7)' }}
-        >SET D-PAD</button>
-
-        <button onClick={() => { const v = parsed(); if (v) onSend(v.lx, v.az) }}
-          disabled={!ready}
-          style={{ flex:1, padding:'8px 0', transition:'all 0.1s',
-            fontFamily:'monospace', fontSize:11, letterSpacing:'0.2em', textTransform:'uppercase', fontWeight:700,
-            border:`1px solid ${ready ? '#C8000A' : 'rgba(255,255,255,0.08)'}`,
-            background: ready ? '#C8000A' : 'transparent',
-            color: ready ? '#ffffff' : 'rgba(255,255,255,0.18)',
-            cursor: ready ? 'pointer' : 'not-allowed' }}
-        >SEND ONCE</button>
-      </div>
-
-      {/* Active speed readout */}
-      <div style={{ background:'rgba(0,0,0,0.4)', border:'1px solid rgba(255,255,255,0.07)',
-        padding:'6px 10px', display:'flex', justifyContent:'space-between' }}>
-        <span style={{ ...T.hint, fontSize:10 }}>D-PAD SPEED</span>
-        <span style={{ fontFamily:'monospace', fontSize:11, color:'rgba(255,255,255,0.55)', letterSpacing:'0.08em' }}>
-          lx {linearSpeed.toFixed(2)} · az {angularSpeed.toFixed(2)}
-        </span>
-      </div>
-    </div>
-  )
-}
-
 // ─── DirBtn ───────────────────────────────────────────────────────────────────
 function DirBtn({ label, display, onStart, onStop, active, disabled }) {
   const isActive = active === label
@@ -388,37 +311,29 @@ function DirBtn({ label, display, onStart, onStop, active, disabled }) {
 }
 
 // ─── TeleopPad ────────────────────────────────────────────────────────────────
-function TeleopPad({ publish, ready, cmdVelTopic, linearSpeed, angularSpeed, hz }) {
+function TeleopPad({ publish, ready, hz }) {
   const intervalRef = useRef(null)
-  const speedRef    = useRef({ linearSpeed, angularSpeed })
   const [active, setActive] = useState(null)
 
-  useEffect(() => { speedRef.current = { linearSpeed, angularSpeed } }, [linearSpeed, angularSpeed])
+  const sendRC = useCallback((steer, throttle) => {
+    if (ready) publish(RC_OVERRIDE_TOPIC, RC_TYPE, rcOverrideMsg(steer, throttle))
+  }, [publish, ready])
 
   const stopAll = useCallback(() => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
     setActive(null)
-    if (ready) publish(cmdVelTopic, 'geometry_msgs/Twist', {
-      linear: { x:0, y:0, z:0 }, angular: { x:0, y:0, z:0 },
-    })
-  }, [publish, ready, cmdVelTopic])
-
-  const DIR = { FWD:[1,0], BACK:[-1,0], LEFT:[0,1], RIGHT:[0,-1] }
+    sendRC(RC.STOP.steer, RC.STOP.throttle)   // neutral steer + throttle = halt
+  }, [sendRC])
 
   const startCmd = useCallback((label) => {
     stopAll()
     if (!ready) return
     setActive(label)
-    const [lm, am] = DIR[label]
-    const send = () => {
-      const { linearSpeed: ls, angularSpeed: as } = speedRef.current
-      publish(cmdVelTopic, 'geometry_msgs/Twist', {
-        linear: { x: lm * ls, y:0, z:0 }, angular: { x:0, y:0, z: am * as },
-      })
-    }
+    const v = RC[label]
+    const send = () => sendRC(v.steer, v.throttle)
     send()
-    intervalRef.current = setInterval(send, 1000 / hz)
-  }, [publish, ready, stopAll, cmdVelTopic, hz])
+    intervalRef.current = setInterval(send, 1000 / hz)   // stream while held — FCU needs continuous override
+  }, [ready, stopAll, sendRC, hz])
 
   useEffect(() => () => stopAll(), [])
   useEffect(() => {
@@ -461,15 +376,8 @@ function TeleopPad({ publish, ready, cmdVelTopic, linearSpeed, angularSpeed, hz 
 }
 
 // ─── PanelBody ────────────────────────────────────────────────────────────────
-function PanelBody({ publish, ready, cmdVelTopic, hz, linearSpeed, angularSpeed, onApply }) {
+function PanelBody({ publish, ready, hz }) {
   const [ctrlOpen, setCtrlOpen] = useState(true)
-
-  const handleSend = useCallback((lx, az) => {
-    if (!ready) return
-    publish(cmdVelTopic, 'geometry_msgs/Twist', {
-      linear: { x: lx, y:0, z:0 }, angular: { x:0, y:0, z: az },
-    })
-  }, [publish, ready, cmdVelTopic])
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
@@ -491,16 +399,7 @@ function PanelBody({ publish, ready, cmdVelTopic, hz, linearSpeed, angularSpeed,
       {ctrlOpen && (
         <div style={{ border:'1px solid rgba(200,0,10,0.22)', borderTop:'none', background:'rgba(0,0,0,0.25)', padding:'14px' }}>
           <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-            <VelInput
-              linearSpeed={linearSpeed} angularSpeed={angularSpeed}
-              onApply={onApply} onSend={handleSend} ready={ready}
-            />
-            <div style={{ height:1, background:'rgba(255,255,255,0.07)' }} />
-            <TeleopPad
-              publish={publish} ready={ready}
-              cmdVelTopic={cmdVelTopic} hz={hz}
-              linearSpeed={linearSpeed} angularSpeed={angularSpeed}
-            />
+            <TeleopPad publish={publish} ready={ready} hz={hz} />
           </div>
         </div>
       )}
@@ -512,27 +411,14 @@ function PanelBody({ publish, ready, cmdVelTopic, hz, linearSpeed, angularSpeed,
 export default function TeleopPanel({
   publish,
   ready,
-  cmdVelTopic = DEFAULT_CMD_VEL,
   hz          = DEFAULT_HZ,
   alwaysOpen  = false,
   defaultOpen = false,
 }) {
-  const [open,         setOpen]         = useState(alwaysOpen || defaultOpen)
-  const [linearSpeed,  setLinearSpeed]  = useState(DEFAULT_LINEAR)
-  const [angularSpeed, setAngularSpeed] = useState(DEFAULT_ANGULAR)
-
-  const handleApply = useCallback((lx, az) => {
-    setLinearSpeed(Math.abs(lx))
-    setAngularSpeed(Math.abs(az))
-  }, [])
+  const [open, setOpen] = useState(alwaysOpen || defaultOpen)
 
   if (alwaysOpen) {
-    return (
-      <PanelBody
-        publish={publish} ready={ready} cmdVelTopic={cmdVelTopic} hz={hz}
-        linearSpeed={linearSpeed} angularSpeed={angularSpeed} onApply={handleApply}
-      />
-    )
+    return <PanelBody publish={publish} ready={ready} hz={hz} />
   }
 
   return (
@@ -573,10 +459,7 @@ export default function TeleopPanel({
 
       {open && (
         <div style={{ border:'1px solid rgba(200,0,10,0.22)', borderTop:'none', background:'rgba(0,0,0,0.2)', padding:'12px 14px' }}>
-          <PanelBody
-            publish={publish} ready={ready} cmdVelTopic={cmdVelTopic} hz={hz}
-            linearSpeed={linearSpeed} angularSpeed={angularSpeed} onApply={handleApply}
-          />
+          <PanelBody publish={publish} ready={ready} hz={hz} />
         </div>
       )}
     </div>

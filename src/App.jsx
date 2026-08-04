@@ -3,7 +3,7 @@ import { EnvironmentProvider } from './context/EnvironmentContext'
 import LoginPage from './pages/LoginPage'
 import DashboardLayout from './components/DashboardLayout'
 import CamerasPage from './pages/CamerasPage'
-import WaypointFollower from './pages/WaypointFollowerMap'
+// import WaypointFollower from './pages/WaypointFollowerMap'
 import WaypointRecorder from './pages/WaypointRecorderUpdated'
 import NavigationPage from './pages/NavigationPage'
 import HSLCamerasPage from './pages/HSLCameraPage'
@@ -22,7 +22,7 @@ export default function App() {
         <Route path="/" element={<DashboardLayout />}>
           <Route index element={<Navigate to="/navigation" replace />} />
           <Route path="cameras"           element={<CamerasPage />} />
-          <Route path="waypoint-follower" element={<WaypointFollower />} />
+          {/* <Route path="waypoint-follower" element={<WaypointFollower />} /> */}
           <Route path="waypoint-recorder" element={<WaypointRecorder />} />
           <Route path="navigation"        element={<NavigationPage />} />
           <Route path="hsl-cameras"       element={<HSLCamerasPage />} />
@@ -30,11 +30,14 @@ export default function App() {
           <Route path="systemcontrol"     element={<SystemControl />} />
           <Route path="mapping"           element={<MappingPage />} />
           <Route path="indoor"            element={<IndoorNavigation />} />
-          <Route path="mission"            element={<TrovMissionControl />} />
+          <Route path="mission"           element={<TrovMissionControl />} />
           <Route path="delivery"          element={<DeliveryControlDashboard />} />
         </Route>
         <Route path="*" element={<Navigate to="/navigation" replace />} />
       </Routes>
+
+      {/* Global on-screen keyboard — mounted once here, works on every page */}
+      <VirtualKeyboard />
     </EnvironmentProvider>
   )
 }

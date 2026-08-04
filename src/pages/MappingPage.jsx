@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState, useCallback } from 'react'
 import TeleopPanel from '../components/TeleopPanel'
 import { useScan, ScanButton, drawScanPoints } from '../components/ScanOverlay'
@@ -233,9 +232,9 @@ function MapCanvas({ mapData, robotPos, cellsExplored, scanPoints, scanPointsRef
         for (let x = 0; x < W; x += 40) for (let y = 0; y < H; y += 40) ctx.fillRect(x-1, y-1, 2, 2)
         ctx.fillStyle = 'rgba(232,232,232,0.1)'; ctx.font = '12px monospace'
         ctx.textAlign = 'center'
-        ctx.fillText(isOutdoorRef.current ? 'No 2D preview (outdoor)' : 'Waiting for /map…', W/2, H/2 - 10)
+        ctx.fillText(isOutdoorRef.current ? 'Point-cloud mapping (outdoor)' : 'Waiting for /map…', W/2, H/2 - 10)
         ctx.font = '9px monospace'; ctx.fillStyle = 'rgba(232,232,232,0.05)'
-        ctx.fillText(isOutdoorRef.current ? 'LidarSLAM builds a point cloud — view in RViz' : 'Start mapping to see map grow here', W/2, H/2 + 10)
+        ctx.fillText(isOutdoorRef.current ? 'Live view in RViz — grid preview appears after Stop & Save' : 'Start mapping to see map grow here', W/2, H/2 + 10)
       }
      
 
@@ -463,6 +462,14 @@ export default function MappingPage() {
   // Map state
   const [mapData,    setMapData]    = useState(null)
   const [mapInfo,    setMapInfo]    = useState(null)   // { width, height, resolution }
+
+  // Outdoor post-save preview: /outdoor_map grid shown ONLY after a save, so the
+  // operator can verify the just-built PCD converted to a sensible 2D map.
+  const [showPreview, setShowPreview] = useState(false)
+  const showPreviewRef = useRef(false)
+  useEffect(() => { showPreviewRef.current = showPreview }, [showPreview])
+  const previewMapRef = useRef(null)   // { decoded, info } latest /outdoor_map
+
   const [robotPos,   setRobotPos]   = useState(null)
   const robotPosRef = useRef(null)
    useEffect(() => { robotPosRef.current = robotPos }, [robotPos])
@@ -531,6 +538,16 @@ export default function MappingPage() {
         const free = msg.data.filter(v => v === 0).length
         setExploredCells(free)
       }, { throttle_rate: 500, queue_length: 1 }),
+
+      // Outdoor: converted PCD grid on /outdoor_map. Cached always, but only
+      // DRAWN after a save (showPreview) so no map is visible before/during mapping.
+      subscribe('/outdoor_map', 'nav_msgs/OccupancyGrid', (msg) => {
+        const decoded = decodeOccupancyGrid(msg)
+        if (!decoded) return
+        const info = { width: msg.info.width, height: msg.info.height, resolution: msg.info.resolution }
+        previewMapRef.current = { decoded, info }
+        if (showPreviewRef.current) { setMapData(decoded); setMapInfo(info) }
+      }, { queue_length: 1, latch: true }),
 
       // AMCL pose (not running during mapping — handled gracefully)
       subscribe('/amcl_pose', 'geometry_msgs/PoseWithCovarianceStamped', (msg) => {
@@ -603,6 +620,7 @@ export default function MappingPage() {
 
       if (res.ok) {
         setMappingPhase('active')           // ← only place that sets active
+        setShowPreview(false); showPreviewRef.current = false   // clear old preview
         setMapData(null); setMapInfo(null); setExploredCells(0)
         addLog(`✓ ${res.data.message}`, 'ok')
         toast('Mapping started', true)
@@ -647,6 +665,11 @@ export default function MappingPage() {
       if (res.ok) {
         setMappingPhase('idle')             // ← only place that returns to idle after save
         setShowSaveModal(false)
+        // Outdoor: reveal the converted grid on /outdoor_map as a verification preview
+        if (isOutdoorRef.current) {
+          setShowPreview(true); showPreviewRef.current = true
+          if (previewMapRef.current) { setMapData(previewMapRef.current.decoded); setMapInfo(previewMapRef.current.info) }
+        }
         addLog(`✓ ${res.data.message}`, 'ok')
         toast(`Map '${mapName}' saved`, true)
         await fetchStatus()
@@ -850,7 +873,9 @@ export default function MappingPage() {
             )}
           </div>
 
-          {/* ─ Teleop Panel ─ */}
+          {/* ─ Teleop Panel (manual control disabled on the mapping page) ─
+              Re-enable by removing the `false &&` guard below. */}
+          {false && (
           <div className="flex-shrink-0 p-4 border-b border-brand-border">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-0.5 h-4 bg-brand-red flex-shrink-0" />
@@ -864,6 +889,7 @@ export default function MappingPage() {
               defaultOpen={false}
             />
           </div>
+          )}
 
           {/* ─ API Status ─ */}
           <div className="flex-shrink-0 p-4 border-b border-brand-border">
@@ -905,13 +931,13 @@ export default function MappingPage() {
             <div className="flex flex-col gap-2">
               {(isOutdoor ? [
                 ['01', 'Click Start Mapping. LidarSLAM starts; localization and navigation stop automatically.'],
-                ['02', 'Open Manual Control below and drive slowly to cover the whole area.'],
+                ['02', 'Drive the robot slowly to cover the whole area.'],
                 ['03', 'The point cloud builds in RViz — there is no 2D preview here yet.'],
                 ['04', 'When done, click Stop & Save and enter a name; the .pcd map is saved.'],
                 ['05', 'Restart outdoor localization to load the new .pcd map.'],
               ] : [
                 ['01', 'Click Start Mapping. Localization and navigation will stop automatically.'],
-                ['02', 'Open Manual Control below and drive the robot to explore the area.'],
+                ['02', 'Drive the robot to explore the area.'],
                 ['03', 'Watch the map grow in real time on the canvas.'],
                 ['04', 'When done, click Stop & Save, enter a name, and confirm.'],
                 ['05', 'Restart localization from System Control using the new map.'],

@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── ROSBRIDGE CONFIG ────────────────────────────────────────────────────────
@@ -114,6 +113,8 @@ const stateLabel = {
 };
 
 const isMoving = (s) => s === S.OUTBOUND || s === S.RETURNING || s === S.DEPARTING;
+// A mission is "active" for any state other than IDLE — this gates the buttons.
+const isMissionActive = (s) => s !== S.IDLE;
 
 // ─── STATUS STRIP ─────────────────────────────────────────────────────────────
 const ConnPill = ({ connected }) => (
@@ -198,10 +199,12 @@ const RouteCard = ({ name, selected, disabled, onSelect }) => (
 );
 
 // ─── ACTION BUTTONS ───────────────────────────────────────────────────────────
-const ActionButtons = ({ selectedRoute, onStart, onStop }) => {
-  // No mission-state lock: Start needs a selected route; Stop is always available.
-  const canStart = !!selectedRoute;
-  const canStop  = true;
+const ActionButtons = ({ selectedRoute, missionActive, onStart, onStop }) => {
+  // Start: needs a selected route AND no mission currently running.
+  // Stop:  available ONLY while a mission is running (state !== IDLE).
+  // After Stop → runner returns to IDLE → Stop disables, Start re-enables.
+  const canStart = !!selectedRoute && !missionActive;
+  const canStop  = missionActive;
 
   const base = "relative overflow-hidden flex flex-col items-center justify-center gap-2 rounded-2xl border font-bold tracking-widest uppercase transition-all duration-200 w-full py-8";
 
@@ -220,24 +223,29 @@ const ActionButtons = ({ selectedRoute, onStart, onStop }) => {
         <span className="text-xl leading-none">Start</span>
         <span className="text-[9px] font-normal"
           style={{ fontFamily: "'DM Mono', monospace", color: canStart ? "#9ca3af" : "#374151" }}>
-          {canStart ? `→ ${selectedRoute}` : "select route first"}
+          {canStart
+            ? `→ ${selectedRoute}`
+            : missionActive ? "mission running" : "select route first"}
         </span>
         {canStart && <span className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
       </button>
 
-      {/* STOP */}
+      {/* STOP — enabled only while a mission is active */}
       <button onClick={onStop} disabled={!canStop}
-        className={`${base} border-red-500 bg-red-500/10 text-white hover:bg-red-500/20 hover:scale-[1.02] hover:shadow-xl hover:shadow-red-500/25 cursor-pointer active:scale-[0.98]`}
+        className={`${base} ${canStop
+          ? "border-red-500 bg-red-500/10 text-white hover:bg-red-500/20 hover:scale-[1.02] hover:shadow-xl hover:shadow-red-500/25 cursor-pointer active:scale-[0.98]"
+          : "border-white/5 bg-white/[0.02] text-gray-700 cursor-not-allowed"}`}
         style={{ fontFamily: "'Teko', sans-serif" }}>
-        <div className="absolute inset-0 bg-gradient-to-b from-red-500/5 to-transparent pointer-events-none" />
-        <svg viewBox="0 0 24 24" fill="none" className="w-9 h-9 text-red-400">
+        {canStop && <div className="absolute inset-0 bg-gradient-to-b from-red-500/5 to-transparent pointer-events-none" />}
+        <svg viewBox="0 0 24 24" fill="none" className={`w-9 h-9 ${canStop ? "text-red-400" : "text-gray-700"}`}>
           <rect x="6" y="6" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
         </svg>
         <span className="text-xl leading-none">Stop</span>
         <span className="text-[9px] font-normal"
-          style={{ fontFamily: "'DM Mono', monospace", color: "#9ca3af" }}>
-          cancel &amp; halt
+          style={{ fontFamily: "'DM Mono', monospace", color: canStop ? "#9ca3af" : "#374151" }}>
+          {canStop ? "cancel & halt" : "no active mission"}
         </span>
+        {canStop && <span className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />}
       </button>
     </div>
   );
@@ -334,7 +342,11 @@ export default function TrovMissionControl() {
 
     if (parsed.state)  setState(parsed.state);
     if (parsed.map)    setActiveMap(parsed.map);
-    if (parsed.route !== undefined) setSelected(parsed.route);
+    // Only sync the selection from a non-empty route so an IDLE status with an
+    // empty route (e.g. at boot or after reconnect) never wipes the operator's
+    // manual pick. After a real mission the route persists, keeping it selected
+    // so Start is immediately available again for the next cycle.
+    if (parsed.route) setSelected(parsed.route);
 
   } catch (e) {
     // Fallback: old plain-string format
@@ -386,6 +398,7 @@ export default function TrovMissionControl() {
   };
 
   const moving = isMoving(state);
+  const missionActive = isMissionActive(state);
 
   return (
     <>
@@ -460,12 +473,13 @@ export default function TrovMissionControl() {
                       style={{ fontFamily: "'Teko', sans-serif" }}>Mission Commands</p>
                   </div>
                   <p className="text-[10px] text-gray-500 leading-relaxed tracking-wide">
-                    Start a delivery mission on the selected route, or stop the rover at any time. Start and Stop stay available throughout the mission.
+                    Select a route and press Start to dispatch the rover. Stop becomes available once a mission is running, and halts it at any time.
                   </p>
                 </div>
                 <div className="flex-1 p-4">
                   <ActionButtons
                     selectedRoute={selected}
+                    missionActive={missionActive}
                     onStart={handleStart}
                     onStop={handleStop}
                   />
@@ -500,7 +514,7 @@ export default function TrovMissionControl() {
                   </p>
                 </div>
 
-                {/* Route list */}
+                {/* Route list — locked while a mission is running */}
                 <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2"
                   style={{ maxHeight: "260px", scrollbarWidth: "none" }}>
                   {routes.length === 0 ? (
@@ -517,7 +531,7 @@ export default function TrovMissionControl() {
                     </div>
                   ) : (
                     routes.map(r => (
-                      <RouteCard key={r} name={r} selected={selected === r} disabled={false} onSelect={setSelected} />
+                      <RouteCard key={r} name={r} selected={selected === r} disabled={missionActive} onSelect={setSelected} />
                     ))
                   )}
                 </div>

@@ -1,5 +1,3 @@
-
-
 // import { useEffect, useRef, useState, useCallback } from 'react'
 // import PTZControl from '../components/PTZControl'
 
@@ -349,11 +347,11 @@
 //           className="border border-brand-border/60 bg-transparent text-white/20 hover:border-brand-red/50 hover:text-brand-red transition-all font-mono text-xs select-none"
 //           style={{ width:54, height:54, borderRadius:6, cursor: ready ? 'pointer' : 'not-allowed' }}
 //         >■</button>
-//         {btn('RIGHT', 0, -SPEED.angular, '▶')}
+//         {btn('RIGHT', '▶')}
 //       </div>
 //       {/* Back */}
 //       <div className="flex justify-center">
-//         {btn('BACK', -SPEED.linear, 0, '▼')}
+//         {btn('BACK', '▼')}
 //       </div>
 //       <p className="font-mono text-[7px] text-white/15 tracking-widest uppercase mt-1">Hold to move · release to stop</p>
 //     </div>
@@ -1089,6 +1087,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import PTZControl from '../components/PTZControl'
+import { useEnvironment } from '../context/EnvironmentContext'
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const ROSBRIDGE_URL = 'wss://trovcamera.edgeforce.in/ros/'
@@ -1122,6 +1121,23 @@ const CAMERAS = [
 ]
 const SPEED    = { linear: 0.5, angular: 1.0 }
 const TELEOP_HZ = 10
+
+// Manual drive via MAVROS RC override (matches TeleopPanel.jsx)
+const RC_OVERRIDE_TOPIC = '/mavros/rc/override'
+const RC_TYPE           = 'mavros_msgs/OverrideRCIn'
+const CH_STEER = 0, CH_THROTTLE = 2, RC_NEUTRAL = 1500, RC_NOCHANGE = 65535
+const RC = {
+  FWD:   { steer: RC_NEUTRAL, throttle: 1520 },
+  BACK:  { steer: RC_NEUTRAL, throttle: 1480 },
+  LEFT:  { steer: 1340,       throttle: RC_NEUTRAL },
+  RIGHT: { steer: 1650,       throttle: RC_NEUTRAL },
+  STOP:  { steer: RC_NEUTRAL, throttle: RC_NEUTRAL },
+}
+function rcOverrideMsg(steer, throttle) {
+  const channels = new Array(18).fill(RC_NOCHANGE)
+  channels[CH_STEER] = steer; channels[CH_THROTTLE] = throttle
+  return { channels }
+}
 
 // ── Fonts ─────────────────────────────────────────────────────────────────────
 // Headings/labels: "Rajdhani"  (bold, wide tracking)
@@ -1533,13 +1549,14 @@ function TeleopPad({ publish, ready }) {
   const stopAll = useCallback(() => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
     setActive(null)
-    if (ready) publish(CMD_VEL, 'geometry_msgs/Twist', { linear:{ x:0,y:0,z:0 }, angular:{ x:0,y:0,z:0 } })
+    if (ready) publish(RC_OVERRIDE_TOPIC, RC_TYPE, rcOverrideMsg(RC.STOP.steer, RC.STOP.throttle))
   }, [publish, ready])
 
-  const startCmd = useCallback((lx, az, label) => {
+  const startCmd = useCallback((label) => {
     stopAll(); if (!ready) return
     setActive(label)
-    const send = () => publish(CMD_VEL, 'geometry_msgs/Twist', { linear:{ x:lx,y:0,z:0 }, angular:{ x:0,y:0,z:az } })
+    const v = RC[label]
+    const send = () => publish(RC_OVERRIDE_TOPIC, RC_TYPE, rcOverrideMsg(v.steer, v.throttle))
     send(); intervalRef.current = setInterval(send, 1000/TELEOP_HZ)
   }, [publish, ready, stopAll])
 
@@ -1550,13 +1567,13 @@ function TeleopPad({ publish, ready }) {
     return () => { window.removeEventListener('mouseup', up); window.removeEventListener('touchend', up) }
   }, [stopAll])
 
-  const btn = (label, lx, az, display) => {
+  const btn = (label, display) => {
     const isActive = active === label
     return (
       <button
-        onMouseDown={e => { e.preventDefault(); startCmd(lx, az, label) }}
+        onMouseDown={e => { e.preventDefault(); startCmd(label) }}
         onMouseUp={stopAll} onMouseLeave={() => { if (active===label) stopAll() }}
-        onTouchStart={e => { e.preventDefault(); startCmd(lx, az, label) }}
+        onTouchStart={e => { e.preventDefault(); startCmd(label) }}
         onTouchEnd={e => { e.preventDefault(); stopAll() }}
         onTouchCancel={e => { e.preventDefault(); stopAll() }}
         disabled={!ready}
@@ -1573,15 +1590,15 @@ function TeleopPad({ publish, ready }) {
   return (
     <div className="flex flex-col items-center gap-1.5 select-none">
       <p style={{ fontFamily:"'DM Mono',monospace", fontSize:8, letterSpacing:'0.2em', textTransform:'uppercase', color:'rgba(255,255,255,0.25)' }} className="mb-1">Velocity Control</p>
-      <div className="flex justify-center">{btn('FWD', SPEED.linear, 0, '▲')}</div>
+      <div className="flex justify-center">{btn('FWD', '▲')}</div>
       <div className="flex gap-1.5 justify-center">
-        {btn('LEFT', 0, SPEED.angular, '◀')}
+        {btn('LEFT', '◀')}
         <button onClick={stopAll} disabled={!ready}
           className="border border-brand-border/50 bg-transparent text-white/20 hover:border-brand-red/40 hover:text-brand-red transition-all"
           style={{ width:50, height:50, borderRadius:4, cursor:ready?'pointer':'not-allowed', fontFamily:"'Rajdhani',sans-serif", fontSize:14 }}>■</button>
-        {btn('RIGHT', 0, -SPEED.angular, '▶')}
+        {btn('RIGHT', '▶')}
       </div>
-      <div className="flex justify-center">{btn('BACK', -SPEED.linear, 0, '▼')}</div>
+      <div className="flex justify-center">{btn('BACK', '▼')}</div>
       <p style={{ fontFamily:"'DM Mono',monospace", fontSize:7, color:'rgba(255,255,255,0.15)', letterSpacing:'0.12em', textTransform:'uppercase', marginTop:4 }}>Hold to move · release to stop</p>
     </div>
   )
@@ -1706,6 +1723,11 @@ function ProcessRow({ name, label, status, onRestart, loading, viaStack }) {
 export default function NavigationPage() {
   const { ready, wsStatus, subscribe, advertise, publish, callService } = useRosBridge(ROSBRIDGE_URL)
 
+  // Sub-system labels differ per environment (indoor slam_toolbox/AMCL vs outdoor lidarslam)
+  const { environment } = useEnvironment()
+  const isOutdoor = environment === 'outdoor'
+  const locLabel = isOutdoor ? 'Localization · lidar_localization' : 'Localization · map_server + amcl'
+
   // ── Sensor state ──────────────────────────────────────────────────────────
   const [sensorHealth, setSensorHealth] = useState({ lidar:null, imu:null, gps:null, all:null })
   const [imuData,  setImuData]  = useState(null)
@@ -1749,7 +1771,7 @@ export default function NavigationPage() {
   // ── ROS subscriptions ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!ready) return
-    advertise(CMD_VEL, 'geometry_msgs/Twist')
+    advertise(RC_OVERRIDE_TOPIC, RC_TYPE)
     advertise(TOPIC.FLOOD_LIGHT, 'std_msgs/msg/Bool')
     advertise(TOPIC.HEADLIGHT,   'std_msgs/msg/Bool')
 
@@ -1989,7 +2011,6 @@ export default function NavigationPage() {
             <div className="flex-shrink-0 px-4 py-4 border-b border-brand-border flex flex-col items-center">
               <TeleopPad publish={publish} ready={ready} />
             </div>
-            <CustomVelInput publish={publish} ready={ready} />
             {/* Mavros mini */}
             <div className="flex-shrink-0 px-4 py-3">
               <p style={{ fontFamily:"'Rajdhani',sans-serif", fontWeight:700, fontSize:9, letterSpacing:'0.25em', textTransform:'uppercase', color:'rgba(255,255,255,0.22)' }} className="mb-2">Flight Controller</p>
@@ -2044,10 +2065,29 @@ export default function NavigationPage() {
                   </div>
                 </div>
               </Card>
+
+
+              {/* ── Stack Controls ── */}
+              <Card>
+                <Label accent="#C8000A">Stack Controls</Label>
+                <p style={{ fontFamily:"'DM Mono',monospace", fontSize:9, color:'rgba(255,255,255,0.28)', lineHeight:1.6, marginBottom:12 }}>
+                  Manage the main ROS service that runs all navigation, localization, and sensor nodes. Stopping the stack halts all autonomous behavior.
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <ActionBtn label="Start Stack" icon="▶" variant="green" loading={loading.start}
+                    onClick={()=>apiAction('start','/api/stack/start','POST',null,'trov.service started')} />
+                  <ActionBtn label="Stop Stack" icon="■" variant="red" loading={loading.stop}
+                    onClick={()=>confirmAction('Stop trov.service? This halts all ROS nodes including navigation and localization.',
+                      ()=>apiAction('stop','/api/stack/stop','POST',null,'trov.service stopped'),'red')} />
+                  <ActionBtn label="Restart Stack" icon="↺" variant="amber" loading={loading.restart}
+                    onClick={()=>confirmAction('Restart trov.service? Robot will be briefly unresponsive during restart.',
+                      ()=>apiAction('restart','/api/stack/restart','POST',null,'trov.service restarted'),'amber')} />
+                </div>
+              </Card>
               
 
                {/* Flight Controller */}
-              <Card>
+              {/* <Card>
                 <Label>Flight Controller State</Label>
                 <p style={{ fontFamily:"'DM Mono',monospace", fontSize:9, color:'rgba(255,255,255,0.28)', lineHeight:1.6, marginBottom:12 }}>
                   MAVROS bridge status. Armed state controls whether motors can receive velocity commands.
@@ -2067,7 +2107,7 @@ export default function NavigationPage() {
                     </div>
                   ))}
                 </div>
-                {/* ARM panel */}
+                 { ARM panel }
                 <div className={`flex items-center gap-2.5 px-3 py-2.5 border mb-3 ${armed?'border-brand-red/40 bg-brand-red/6':'border-white/8 bg-white/[0.015]'}`}>
                   <span className={`w-2 h-2 rounded-full flex-shrink-0 ${armed?'bg-brand-red animate-pulse-dot':'bg-white/35'}`} />
                   <div className="flex-1">
@@ -2103,10 +2143,10 @@ export default function NavigationPage() {
                     {armBusy?'Disarming…':'DISARM Vehicle'}
                   </button>
                 )}
-              </Card>
+              </Card> */}
               
               {/* Sensor Details */}
-              <div className="flex flex-col gap-3">
+              {/* <div className="flex flex-col gap-3">
                 <SensorCard label="LiDAR" description="3D point cloud depth sensor for obstacle detection and mapping"
                   healthy={sensorHealth.lidar} lastSeen={lastSeen.lidar} icon="⬡"
                   detail={{ 'Timeout':'1.0 s', 'Status': sensorHealth.lidar===true?'Receiving':'No signal' }} />
@@ -2114,7 +2154,7 @@ export default function NavigationPage() {
                   healthy={sensorHealth.imu} lastSeen={lastSeen.imu} icon="◎" detail={imuDetail||{ 'Status':'Waiting for data' }} />
                 <SensorCard label="GPS" description="Global positioning via MAVROS — latitude, longitude, altitude"
                   healthy={sensorHealth.gps} lastSeen={lastSeen.gps} icon="◈" detail={gpsDetail||{ 'Status':'Waiting for data' }} />
-              </div>
+              </div> */}
 
              
 
@@ -2194,24 +2234,6 @@ export default function NavigationPage() {
 
               </div>
 
-              {/* ── Stack Controls ── */}
-              <Card>
-                <Label accent="#C8000A">Stack Controls</Label>
-                <p style={{ fontFamily:"'DM Mono',monospace", fontSize:9, color:'rgba(255,255,255,0.28)', lineHeight:1.6, marginBottom:12 }}>
-                  Manage the main ROS service that runs all navigation, localization, and sensor nodes. Stopping the stack halts all autonomous behavior.
-                </p>
-                <div className="grid grid-cols-3 gap-2">
-                  <ActionBtn label="Start Stack" icon="▶" variant="green" loading={loading.start}
-                    onClick={()=>apiAction('start','/api/stack/start','POST',null,'trov.service started')} />
-                  <ActionBtn label="Stop Stack" icon="■" variant="red" loading={loading.stop}
-                    onClick={()=>confirmAction('Stop trov.service? This halts all ROS nodes including navigation and localization.',
-                      ()=>apiAction('stop','/api/stack/stop','POST',null,'trov.service stopped'),'red')} />
-                  <ActionBtn label="Restart Stack" icon="↺" variant="amber" loading={loading.restart}
-                    onClick={()=>confirmAction('Restart trov.service? Robot will be briefly unresponsive during restart.',
-                      ()=>apiAction('restart','/api/stack/restart','POST',null,'trov.service restarted'),'amber')} />
-                </div>
-              </Card>
-
               {/* ── Sub-system Restarts ── */}
               <Card>
                 <Label>Sub-System Restarts</Label>
@@ -2219,7 +2241,7 @@ export default function NavigationPage() {
                   Restart individual nodes without cycling the full stack. Useful for recovering a specific component without interrupting others.
                 </p>
                 <div className="flex flex-col gap-2">
-                  <ProcessRow name="localization" label="Localization · map_server + amcl"
+                  <ProcessRow name="localization" label={locLabel}
                     status={processStatus?.localization} loading={loading.localization}
                     onRestart={()=>{ fetchMaps(); setShowMapModal(true) }} />
                   <ProcessRow name="navigation"   label="Navigation · bt_navigator"
@@ -2236,7 +2258,7 @@ export default function NavigationPage() {
               </Card>
 
               {/* ── Process Status ── */}
-              <Card>
+              {/* <Card>
                 <div className="flex items-center justify-between mb-1">
                   <Label>Process Status</Label>
                   <button onClick={fetchStatus}
@@ -2261,7 +2283,7 @@ export default function NavigationPage() {
                     )
                   })}
                 </div>
-              </Card>
+              </Card> */}
 
               {/* ── Maps ── */}
               <Card>

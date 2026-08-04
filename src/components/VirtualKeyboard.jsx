@@ -1,13 +1,47 @@
 import { useEffect, useState, useRef } from 'react'
 
-const ROWS = [
-  ['q','w','e','r','t','y','u','i','o','p'],
-  ['a','s','d','f','g','h','j','k','l'],
-  ['z','x','c','v','b','n','m'],
+// ── Config ───────────────────────────────────────────────────────────────────
+// Flip to true while debugging: logs every focus event to the console so you
+// can see WHICH element got focus (tag/type) — useful when the keyboard won't
+// appear (e.g. the field is a contentEditable div, not a real <input>).
+const DEBUG = false
+
+// On a touchscreen kiosk, tag the focused field with inputmode="none" so the
+// OS/native on-screen keyboard does NOT also pop up. Harmless on machines that
+// have no native keyboard, and it never blocks a physical keyboard.
+const SUPPRESS_NATIVE = true
+
+// ── Layouts ──────────────────────────────────────────────────────────────────
+const NUMS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
+
+const LETTERS = [
+  ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+  ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+  ['z', 'x', 'c', 'v', 'b', 'n', 'm'],
 ]
 
-const NUMS = ['1','2','3','4','5','6','7','8','9','0','-','_']
+const SYMBOLS = [
+  ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')'],
+  ['~', '`', '=', '+', '[', ']', '{', '}', '\\', '|'],
+  [';', ':', '\'', '"', ',', '<', '>', '?'],
+]
 
+// Editable-element test — covers inputs, textareas AND contentEditable nodes.
+function isEditable(el) {
+  if (!el) return false
+  const tag = el.tagName
+  if (tag === 'INPUT') {
+    const t = (el.type || 'text').toLowerCase()
+    // Skip inputs that don't take free text (or that our layout can't serve).
+    return !['range', 'checkbox', 'radio', 'color', 'file', 'button',
+             'submit', 'reset', 'image', 'number'].includes(t)
+  }
+  if (tag === 'TEXTAREA') return true
+  if (el.isContentEditable) return true
+  return false
+}
+
+// ── Single key ───────────────────────────────────────────────────────────────
 function Key({ label, onPress, flex, active, accent }) {
   const [pressed, setPressed] = useState(false)
   return (
@@ -47,36 +81,41 @@ function Key({ label, onPress, flex, active, accent }) {
   )
 }
 
+// A blank slot used to keep rows aligned (e.g. left of the symbols bottom row).
+function Spacer({ flex }) {
+  return <div style={{ flex: flex || 1 }} />
+}
+
+// ── Keyboard ─────────────────────────────────────────────────────────────────
 export default function GlobalVirtualKeyboard() {
   const [visible, setVisible] = useState(false)
   const [caps, setCaps] = useState(false)
+  const [layer, setLayer] = useState('letters') // 'letters' | 'symbols'
   const activeInputRef = useRef(null)
 
   useEffect(() => {
     const onFocus = (e) => {
-      const tag = e.target.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') {
-        const type = e.target.type
-        if (type === 'range' || type === 'checkbox' || type === 'radio' || type === 'number') return
-        activeInputRef.current = e.target
-        setVisible(true)
+      const el = e.target
+      if (DEBUG) console.log('[VKB] focusin →', el.tagName, el.type, el)
+      if (!isEditable(el)) return
+      activeInputRef.current = el
+      if (SUPPRESS_NATIVE && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+        el.setAttribute('inputmode', 'none')
       }
+      setVisible(true)
     }
     const onBlur = (e) => {
-      const tag = e.target.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') {
-        setTimeout(() => {
-          if (
-            document.activeElement.tagName !== 'INPUT' &&
-            document.activeElement.tagName !== 'TEXTAREA'
-          ) {
-            setVisible(false)
-            activeInputRef.current = null
-          } else {
-            activeInputRef.current = document.activeElement
-          }
-        }, 150)
-      }
+      if (!isEditable(e.target)) return
+      // Delay so focus can move between fields without flickering the keyboard.
+      setTimeout(() => {
+        const ae = document.activeElement
+        if (isEditable(ae)) {
+          activeInputRef.current = ae
+        } else {
+          setVisible(false)
+          activeInputRef.current = null
+        }
+      }, 150)
     }
     document.addEventListener('focusin', onFocus)
     document.addEventListener('focusout', onBlur)
@@ -86,9 +125,15 @@ export default function GlobalVirtualKeyboard() {
     }
   }, [])
 
+  // Insert text at the caret of the focused field (input/textarea or CE div).
   const typeInto = (char) => {
     const el = activeInputRef.current
     if (!el) return
+    if (el.isContentEditable) {
+      el.focus()
+      document.execCommand('insertText', false, char)
+      return
+    }
     const nativeSetter =
       Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set ||
       Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
@@ -106,6 +151,11 @@ export default function GlobalVirtualKeyboard() {
   const backspace = () => {
     const el = activeInputRef.current
     if (!el) return
+    if (el.isContentEditable) {
+      el.focus()
+      document.execCommand('delete')
+      return
+    }
     const nativeSetter =
       Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set ||
       Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
@@ -136,15 +186,21 @@ export default function GlobalVirtualKeyboard() {
   }
 
   const press = (key) => {
-    if (key === 'CAPS')      { setCaps(c => !c); return }
-    if (key === 'BACKSPACE') { backspace(); return }
-    if (key === 'SPACE')     { typeInto(' '); return }
-    if (key === 'ENTER')     { pressEnter(); return }
-    if (key === 'CLOSE')     { setVisible(false); activeInputRef.current?.blur(); return }
-    typeInto(caps ? key.toUpperCase() : key)
+    switch (key) {
+      case 'CAPS':      setCaps(c => !c); return
+      case 'LAYER':     setLayer(l => (l === 'letters' ? 'symbols' : 'letters')); return
+      case 'BACKSPACE': backspace(); return
+      case 'SPACE':     typeInto(' '); return
+      case 'ENTER':     pressEnter(); return
+      case 'CLOSE':     setVisible(false); activeInputRef.current?.blur(); return
+      default:          typeInto(caps && layer === 'letters' ? key.toUpperCase() : key)
+    }
   }
 
   if (!visible) return null
+
+  const rows = layer === 'letters' ? LETTERS : SYMBOLS
+  const rowStyle = { display: 'flex', gap: 5, marginBottom: 5, justifyContent: 'center' }
 
   return (
     <div
@@ -152,7 +208,7 @@ export default function GlobalVirtualKeyboard() {
       style={{
         position: 'fixed',
         bottom: 0, left: 0, right: 0,
-        zIndex: 99999,
+        zIndex: 999999,
         background: '#0d0d0d',
         borderTop: '1px solid rgba(255,255,255,0.1)',
         padding: '6px 8px 10px',
@@ -178,25 +234,52 @@ export default function GlobalVirtualKeyboard() {
         </button>
       </div>
 
-      {/* Number row */}
+      {/* Number row (always visible in both layers) */}
       <div style={{ display: 'flex', gap: 5, marginBottom: 5 }}>
         {NUMS.map(k => <Key key={k} label={k} onPress={() => press(k)} />)}
       </div>
 
-      {/* Letter rows */}
-      {ROWS.map((row, ri) => (
-        <div key={ri} style={{ display: 'flex', gap: 5, marginBottom: 5, justifyContent: 'center' }}>
+      {/* First two content rows */}
+      {rows.slice(0, 2).map((row, ri) => (
+        <div key={`r${ri}`} style={rowStyle}>
           {row.map(k => (
-            <Key key={k} label={caps ? k.toUpperCase() : k} onPress={() => press(k)} />
+            <Key
+              key={k}
+              label={caps && layer === 'letters' ? k.toUpperCase() : k}
+              onPress={() => press(k)}
+            />
           ))}
         </div>
       ))}
 
-      {/* Bottom row */}
+      {/* Third content row — CAPS (letters) / spacer (symbols) … keys … BACKSPACE */}
+      <div style={rowStyle}>
+        {layer === 'letters'
+          ? <Key label="CAPS" onPress={() => press('CAPS')} flex={1.6} active={caps} />
+          : <Spacer flex={1.6} />}
+        {rows[2].map(k => (
+          <Key
+            key={k}
+            label={caps && layer === 'letters' ? k.toUpperCase() : k}
+            onPress={() => press(k)}
+          />
+        ))}
+        <Key label="⌫" onPress={() => press('BACKSPACE')} flex={1.6} />
+      </div>
+
+      {/* Function row — layer toggle, quick filename chars, space, enter */}
       <div style={{ display: 'flex', gap: 5 }}>
-        <Key label="CAPS" onPress={() => press('CAPS')} flex={1.5} active={caps} />
-        <Key label="SPACE" onPress={() => press('SPACE')} flex={5} />
-        <Key label="⌫" onPress={() => press('BACKSPACE')} flex={1.5} />
+        <Key
+          label={layer === 'letters' ? '?123' : 'ABC'}
+          onPress={() => press('LAYER')}
+          flex={1.8}
+          accent
+        />
+        <Key label="." onPress={() => press('.')} flex={1} />
+        <Key label="/" onPress={() => press('/')} flex={1} />
+        <Key label="SPACE" onPress={() => press('SPACE')} flex={4} />
+        <Key label="-" onPress={() => press('-')} flex={1} />
+        <Key label="_" onPress={() => press('_')} flex={1} />
         <Key label="ENTER" onPress={() => press('ENTER')} flex={2} accent />
       </div>
     </div>

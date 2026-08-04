@@ -1,6 +1,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import TeleopPanel from '../components/TeleopPanel'
+import { useEnvironment } from '../context/EnvironmentContext'
 import { useScan, ScanButton, drawScanPoints } from '../components/ScanOverlay'
 
 
@@ -22,6 +23,17 @@ const TOPIC = {
   MAP:                 '/map',
   AMCL:                '/amcl_pose',
 }
+
+// ── Outdoor localization display topics ───────────────────────────────────────
+// Indoor draws /map (slam_toolbox/map_server) and reads pose from /amcl_pose.
+// Outdoor draws /outdoor_map (pcd_to_grid) and reads pose from the lidar
+// localizer. >>> CONFIRM the pose topic + type on the AGX:
+//     ros2 topic list | grep -i pose
+// lidar_localization_ros2 commonly publishes /current_pose (PoseStamped). If
+// yours differs (e.g. /pcl_pose PoseWithCovarianceStamped), change these two.
+const OUTDOOR_MAP        = '/outdoor_map'
+const OUTDOOR_POSE_TOPIC = '/pcl_pose'
+const OUTDOOR_POSE_TYPE  = 'geometry_msgs/PoseStamped'
 
 const C = { red: '#C8000A', green: '#22c55e', amber: '#f59e0b' }
 
@@ -378,6 +390,13 @@ function StatBox({ label, value, accent }) {
 export default function WaypointRecorder() {
   const { ready, wsStatus, subscribe, advertise, publish } = useRosBridge(ROSBRIDGE_URL)
 
+  // Indoor vs outdoor: only the map + pose display topics differ (same msg logic)
+  const { environment } = useEnvironment()
+  const isOutdoor = environment === 'outdoor'
+  const mapTopic  = isOutdoor ? OUTDOOR_MAP        : TOPIC.MAP
+  const poseTopic = isOutdoor ? OUTDOOR_POSE_TOPIC : TOPIC.AMCL
+  const poseType  = isOutdoor ? OUTDOOR_POSE_TYPE  : 'geometry_msgs/PoseWithCovarianceStamped'
+
   // Node state — matches new Python status JSON
   const [status, setStatus] = useState({ mode:'idle', recording:false, map:'unknown', route:'default', count:0, pending_points:0 })
   const statusRef = useRef({ mode:'idle', recording:false, map:'unknown', route:'default', count:0, pending_points:0 })
@@ -425,7 +444,7 @@ export default function WaypointRecorder() {
     advertise(TOPIC.CANCEL_MAP_SELECT, 'std_msgs/Empty')
 
     const unsubs = [
-      subscribe(TOPIC.MAP, 'nav_msgs/OccupancyGrid', (msg) => {
+      subscribe(mapTopic, 'nav_msgs/OccupancyGrid', (msg) => {
         const d = decodeOccupancyGrid(msg)
         if (d) {
           setMapData(d)
@@ -434,8 +453,10 @@ export default function WaypointRecorder() {
         }
       }, { queue_length:0, latch:true }),
 
-      subscribe(TOPIC.AMCL, 'geometry_msgs/PoseWithCovarianceStamped', (msg) => {
-        const pos = msg.pose?.pose?.position, ori = msg.pose?.pose?.orientation
+      subscribe(poseTopic, poseType, (msg) => {
+        // Tolerant of PoseWithCovarianceStamped (pose.pose.*) and PoseStamped (pose.*)
+        const pos = msg.pose?.pose?.position ?? msg.pose?.position
+        const ori = msg.pose?.pose?.orientation ?? msg.pose?.orientation
         if (!pos) return
         let yaw = 0; if (ori) { const{x,y,z,w}=ori; yaw=Math.atan2(2*(w*z+x*y),1-2*(y*y+z*z)) }
         const np = { x:pos.x, y:pos.y, yaw }
@@ -791,7 +812,9 @@ export default function WaypointRecorder() {
               <CtrlBtn label="Stop & Save"     icon="■" onClick={sendStop}  disabled={!isDrive||!ready} variant="amber" />
             </div>
 
-            {/* Map-select controls */}
+            {/* Map-select recording disabled for both indoor and outdoor.
+                Re-enable by removing the `false &&` guard below. */}
+            {false && (
             <div className="flex-shrink-0 p-4 border-b border-brand-border flex flex-col gap-2">
               <p className="font-mono text-[10px] tracking-[0.25em] text-white/35 uppercase font-bold mb-1">Map-Select Recording</p>
               {!mapSelectMode && !isMapSelect ? (
@@ -804,6 +827,7 @@ export default function WaypointRecorder() {
                 </>
               )}
             </div>
+            )}
 
             {/* Clear routes */}
             <div className="flex-shrink-0 px-4 pb-3 border-b border-brand-border">
