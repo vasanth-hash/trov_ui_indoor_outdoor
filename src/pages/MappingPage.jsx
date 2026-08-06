@@ -114,12 +114,21 @@ function decodeOccupancyGrid(mapMsg) {
 }
 
 // ── MapCanvas ─────────────────────────────────────────────────────────────────
-function MapCanvas({ mapData, robotPos, cellsExplored, scanPoints, scanPointsRef }) {
+function MapCanvas({ mapData, robotPos, cellsExplored, scanPoints, scanPointsRef, isOutdoor }) {
   const canvasRef = useRef(null)
   const viewRef   = useRef(null)
   const tileRef   = useRef(null)
   const fittedRef = useRef(false)
   const scanRef = useRef(scanPoints) ; useEffect(() => { scanRef.current = scanPoints }, [scanPoints])
+
+  // MapCanvas is a sibling component, not a child scope of MappingPage — it needs
+  // its OWN ref for isOutdoor. (Previously this read a parent-scope isOutdoorRef
+  // that didn't exist here, which threw inside the RAF draw loop the first time
+  // there was no map tile yet — permanently killing the animation loop before it
+  // could ever schedule its next frame, so the canvas froze even once real map
+  // data arrived later. This local ref fixes that.)
+  const isOutdoorRef = useRef(isOutdoor)
+  useEffect(() => { isOutdoorRef.current = isOutdoor }, [isOutdoor])
 
   // Keep track of previous dimensions to detect actual size changes
   const prevDimsRef = useRef({ width: 0, height: 0 })
@@ -478,14 +487,17 @@ export default function MappingPage() {
   // ── SINGLE SOURCE OF TRUTH: mappingPhase ────────────────────────────────────
   // One enum drives everything. No competing signals, no ref/state mixing.
   //
-  //  'idle'     → fresh load or after save. Start=enabled, Stop&Save=disabled
+  //  'idle'     → not mapping. Start=enabled, Stop&Save=disabled
   //  'starting' → POST /api/mapping/start sent, waiting for response
-  //  'active'   → start API returned 200. Start=disabled, Stop&Save=enabled
+  //  'active'   → SLAM is running (either just started, or confirmed by poll)
   //  'saving'   → POST /api/mapping/stop_and_save sent, waiting for response
   //
-  // The polling result (gmapping_running) ONLY updates phase when we are in
-  // 'active' — and only to confirm it's still running. It cannot flip 'idle'
-  // to 'active' (so stale pgrep can't re-enable Stop&Save on refresh).
+  // The 5s status poll HYDRATES phase from backend truth (gmapping_running)
+  // whenever no click is in flight, so a page refresh or a route change (this
+  // component unmounts every time you leave the page) always reflects what is
+  // actually running on the robot, not stale local state. The only exception
+  // is the brief 'starting'/'saving' window right after a click, which the
+  // poll leaves alone so it isn't undone before the backend catches up.
   // tempReady from the poll is IGNORED for button state — it only shows the
   // amber hint banner, never enables Stop&Save on its own.
   const [mappingPhase, setMappingPhase] = useState('idle')
@@ -529,7 +541,9 @@ export default function MappingPage() {
     advertise(CMD_VEL, 'geometry_msgs/Twist')
 
     const unsubs = [
-      // Live map from slam_toolbox — purely visual, never drives button state
+      // Live map from slam_toolbox — purely visual, never drives button state.
+      // latch:true so returning to this page (refresh or route change) shows
+      // the last known map immediately instead of waiting for the next update.
       subscribe('/map', 'nav_msgs/OccupancyGrid', (msg) => {
         const decoded = decodeOccupancyGrid(msg)
         if (!decoded) return
@@ -537,7 +551,7 @@ export default function MappingPage() {
         setMapInfo({ width: msg.info.width, height: msg.info.height, resolution: msg.info.resolution })
         const free = msg.data.filter(v => v === 0).length
         setExploredCells(free)
-      }, { throttle_rate: 500, queue_length: 1 }),
+      }, { throttle_rate: 500, queue_length: 1, latch: true }),
 
       // Outdoor: converted PCD grid on /outdoor_map. Cached always, but only
       // DRAWN after a save (showPreview) so no map is visible before/during mapping.
@@ -571,8 +585,14 @@ export default function MappingPage() {
   }, [ready, subscribe, advertise, addLog])
 
   // ── Poll mapping status every 5 s — display only ───────────────────────────
-  // The poll result NEVER changes button state. mappingPhase is the sole authority.
-  // Poll is only used to populate the status panel (SLAM Process row, Temp Map row).
+  // The poll now HYDRATES mappingPhase from backend truth whenever no button
+  // click is in flight — this is what makes the page correct after a refresh
+  // or after navigating away and back (React unmounts this page on route
+  // change, so local state like mappingPhase starts fresh every time; only
+  // the backend actually knows whether SLAM is still running).
+  // 'starting'/'saving' are short-lived optimistic states set by the button
+  // handlers themselves and are left alone here so a click isn't visibly
+  // undone by a poll that hasn't caught up yet.
   const inFlightRef = useRef(false)
 
   const fetchStatus = useCallback(async () => {
@@ -580,12 +600,17 @@ export default function MappingPage() {
       const res = await apiFetch('/api/mapping/status')
       if (res.ok) {
         setMappingStatus(res.data)
-        console.log('[MappingPage] poll →', res.data, '| phase:', mappingPhase)
+        if (!inFlightRef.current) {
+          setMappingPhase(prev => {
+            if (prev === 'starting' || prev === 'saving') return prev
+            return res.data.gmapping_running ? 'active' : 'idle'
+          })
+        }
       }
     } catch (err) {
       console.error('[MappingPage] fetchStatus error:', err)
     }
-  }, [mappingPhase])
+  }, [])
 
   useEffect(() => {
     fetchStatus()
@@ -784,7 +809,7 @@ export default function MappingPage() {
               ))}
             </div>
 
-            <MapCanvas mapData={mapData} robotPos={robotPos} cellsExplored={exploredCells}               scanPoints={scanPoints}
+            <MapCanvas mapData={mapData} robotPos={robotPos} cellsExplored={exploredCells} isOutdoor={isOutdoor}               scanPoints={scanPoints}
               scanPointsRef={scanPointsRef}  />
           </div>
 
