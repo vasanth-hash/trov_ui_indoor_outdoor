@@ -1098,12 +1098,12 @@ const WEBRTC_PORT   = 8889
 const SENSOR_TOPICS = {
   LIDAR: '/sensor_health/lidar',
   IMU:   '/sensor_health/imu',
-  GPS:   '/sensor_health/gps',
+  // GPS:   '/sensor_health/gps',
   ALL:   '/sensor_health/all',
 }
 const RAW_TOPICS = {
   IMU_RAW:      '/imu/data',
-  GPS_RAW:      '/mavros/global_position/global',
+  // GPS_RAW:      '/mavros/global_position/global',
   MAVROS_STATE: '/mavros/state',
 }
 const TOPIC = {
@@ -1729,11 +1729,11 @@ export default function NavigationPage() {
   const locLabel = isOutdoor ? 'Localization · lidar_localization' : 'Localization · map_server + amcl'
 
   // ── Sensor state ──────────────────────────────────────────────────────────
-  const [sensorHealth, setSensorHealth] = useState({ lidar:null, imu:null, gps:null, all:null })
+  const [sensorHealth, setSensorHealth] = useState({ lidar:null, imu:null, all:null })
   const [imuData,  setImuData]  = useState(null)
-  const [gpsData,  setGpsData]  = useState(null)
+  // const [gpsData,  setGpsData]  = useState(null)
   const [mavState, setMavState] = useState(null)
-  const [lastSeen, setLastSeen] = useState({ lidar:null, imu:null, gps:null })
+  const [lastSeen, setLastSeen] = useState({ lidar:null, imu:null})
 
   // ── Arm state ────────────────────────────────────────────────────────────
   const [armed,      setArmed]      = useState(false)
@@ -1784,17 +1784,17 @@ export default function NavigationPage() {
         setSensorHealth(p=>({...p,imu:msg.data}))
         if (msg.data) setLastSeen(p=>({...p,imu:ts()}))
       }),
-      subscribe(SENSOR_TOPICS.GPS, 'std_msgs/Bool', msg => {
-        setSensorHealth(p=>({...p,gps:msg.data}))
-        if (msg.data) setLastSeen(p=>({...p,gps:ts()}))
-      }),
+      // subscribe(SENSOR_TOPICS.GPS, 'std_msgs/Bool', msg => {
+      //   setSensorHealth(p=>({...p,gps:msg.data}))
+      //   if (msg.data) setLastSeen(p=>({...p,gps:ts()}))
+      // }),
       subscribe(SENSOR_TOPICS.ALL, 'std_msgs/Bool', msg => setSensorHealth(p=>({...p,all:msg.data}))),
       subscribe(RAW_TOPICS.IMU_RAW, 'sensor_msgs/Imu', msg => {
         setImuData(msg); setLastSeen(p=>({...p,imu:ts()}))
       }),
-      subscribe(RAW_TOPICS.GPS_RAW, 'sensor_msgs/NavSatFix', msg => {
-        setGpsData(msg); setLastSeen(p=>({...p,gps:ts()}))
-      }),
+      // subscribe(RAW_TOPICS.GPS_RAW, 'sensor_msgs/NavSatFix', msg => {
+      //   setGpsData(msg); setLastSeen(p=>({...p,gps:ts()}))
+      // }),
       subscribe(RAW_TOPICS.MAVROS_STATE, 'mavros_msgs/State', msg => {
         setMavState(msg); setArmed(msg.armed||false)
       }),
@@ -1878,7 +1878,7 @@ export default function NavigationPage() {
   const sensors = [
     { key:'lidar', healthy:sensorHealth.lidar },
     { key:'imu',   healthy:sensorHealth.imu   },
-    { key:'gps',   healthy:sensorHealth.gps   },
+    // { key:'gps',   healthy:sensorHealth.gps   },
   ]
   const imuDetail = imuData ? {
     'Lin X': `${imuData.linear_acceleration?.x?.toFixed(3)??'—'} m/s²`,
@@ -1886,12 +1886,12 @@ export default function NavigationPage() {
     'Lin Z': `${imuData.linear_acceleration?.z?.toFixed(3)??'—'} m/s²`,
     'Ang Z': `${imuData.angular_velocity?.z?.toFixed(3)??'—'} rad/s`,
   } : null
-  const gpsDetail = gpsData ? {
-    'Latitude':  `${gpsData.latitude?.toFixed(6)??'—'}°`,
-    'Longitude': `${gpsData.longitude?.toFixed(6)??'—'}°`,
-    'Altitude':  `${gpsData.altitude?.toFixed(2)??'—'} m`,
-    'Fix':       gpsData.status?.status===0?'GPS FIX':gpsData.status?.status>0?'DGPS':'NO FIX',
-  } : null
+  // const gpsDetail = gpsData ? {
+  //   'Latitude':  `${gpsData.latitude?.toFixed(6)??'—'}°`,
+  //   'Longitude': `${gpsData.longitude?.toFixed(6)??'—'}°`,
+  //   'Altitude':  `${gpsData.altitude?.toFixed(2)??'—'} m`,
+  //   'Fix':       gpsData.status?.status===0?'GPS FIX':gpsData.status?.status>0?'DGPS':'NO FIX',
+  // } : null
 
   const batteryColor = batteryPct==null?'rgba(255,255,255,0.25)': batteryPct>60?'#22c55e': batteryPct>25?'#f59e0b':'#ef4444'
   const stackCol = stackStatus==='active'?'#22c55e': stackStatus==='inactive'?'#94a3b8':'#ef4444'
@@ -2047,7 +2047,7 @@ export default function NavigationPage() {
                     {[
                       { key:'lidar', label:'LiDAR', icon:'⬡' },
                       { key:'imu',   label:'IMU',   icon:'◎' },
-                      { key:'gps',   label:'GPS',   icon:'◈' },
+                      // { key:'gps',   label:'GPS',   icon:'◈' },
                     ].map(({ key, label, icon }) => {
                       const h = sensorHealth[key]
                       const col = h===true?'#22c55e': h===false?'#C8000A':'rgba(255,255,255,0.2)'

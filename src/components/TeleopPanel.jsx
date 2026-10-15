@@ -25,10 +25,10 @@ const RC_NOCHANGE = 65535   // OverrideRCIn: leave a channel untouched
 
 // Hardcoded PWM (µs) per direction — steer on rc0, throttle on rc2
 const RC = {
-  FWD:   { steer: RC_NEUTRAL, throttle: 1520 },
-  BACK:  { steer: RC_NEUTRAL, throttle: 1480 },
-  LEFT:  { steer: 1340,       throttle: RC_NEUTRAL },
-  RIGHT: { steer: 1650,       throttle: RC_NEUTRAL },
+  FWD:   { steer: RC_NEUTRAL, throttle: 1530 },
+  BACK:  { steer: RC_NEUTRAL, throttle: 1470 },
+  LEFT:  { steer: 1330,       throttle: RC_NEUTRAL },
+  RIGHT: { steer: 1660,       throttle: RC_NEUTRAL },
   STOP:  { steer: RC_NEUTRAL, throttle: RC_NEUTRAL },
 }
 
